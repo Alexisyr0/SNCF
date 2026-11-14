@@ -25,16 +25,17 @@ SNCF Connect n'a pas d'API publique et bloque les robots qui ne passent pas par 
 5. Sur iPhone, ouvre la même adresse dans Safari, puis **Partager › Sur l'écran d'accueil**.
 
 ### 3. Le robot sur le Mac
-Dans le Terminal :
+Dans le Terminal (après avoir exécuté le SQL et créé ton compte dans l'app) :
 ```
-cd ~/Chemin/vers/Premiere/robot
+git clone https://github.com/Alexisyr0/SNCF.git ~/Projets/SNCF
+cd ~/Projets/SNCF/premiere/robot
 bash installer.sh
 ```
 L'installation te demande l'URL Supabase, la clé anon, ton e-mail et ton mot de passe de l'app. Elle demande aussi, si tu veux, un sujet **ntfy** (une suite de mots au hasard, par exemple `premiere-alexis-7f3k`). Ensuite le robot démarre tout seul à chaque ouverture de session.
 
-- Voir ce que fait le robot : `bash installer.sh journal`
-- L'arrêter : `bash installer.sh arreter`
-- Le mettre à jour après un changement du code : relance `bash installer.sh`
+- Voir ce que fait le robot : `bash ~/Projets/SNCF/premiere/robot/installer.sh journal`
+- L'arrêter : `bash ~/Projets/SNCF/premiere/robot/installer.sh arreter`
+- Le mettre à jour : `cd ~/Projets/SNCF && git pull && bash premiere/robot/installer.sh`
 
 ### 4. Alertes sur l'iPhone
 Installe l'app gratuite **ntfy** et abonne-toi au sujet choisi pendant l'installation. Quand le prix d'un trajet suivi baisse, tu reçois une notification. Le Mac en affiche une aussi.
