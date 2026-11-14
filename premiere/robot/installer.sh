@@ -28,24 +28,10 @@ if [ ! -d "/Applications/Google Chrome.app" ]; then
   .venv/bin/python -m playwright install chromium
 fi
 
-echo "3/4  Configuration…"
-if [ ! -f config.env ]; then
-  read -r -p "     URL Supabase (https://xxxx.supabase.co) : " URL
-  read -r -p "     Clé anon (publique) Supabase : " CLE
-  read -r -p "     Ton e-mail de connexion à l'app : " MAIL
-  read -r -s -p "     Ton mot de passe de l'app : " MDP; echo
-  read -r -p "     Sujet ntfy pour les alertes iPhone (laisser vide si aucun) : " NTFY
-  read -r -p "     Adresse de l'app (ex. https://premiere.pages.dev, facultatif) : " APP
-  cat > config.env <<EOF
-SUPABASE_URL=$URL
-SUPABASE_ANON_KEY=$CLE
-EMAIL=$MAIL
-MOT_DE_PASSE=$MDP
-NTFY_TOPIC=$NTFY
-APP_URL=$APP
-PAUSE=5
-EOF
-  chmod 600 config.env
+echo "3/4  Configuration et test de connexion…"
+if ! .venv/bin/python configurer.py; then
+  launchctl bootout "$DOMAINE" "$PLIST" 2>/dev/null || true
+  exit 1
 fi
 
 echo "4/4  Démarrage automatique…"
@@ -71,5 +57,5 @@ launchctl bootstrap "$DOMAINE" "$PLIST"
 sleep 3
 echo
 echo "✅ Robot installé : il tourne maintenant en fond et redémarre avec le Mac."
-echo "   Voir ce qu'il fait : bash installer.sh journal"
+echo "   Voir ce qu'il fait : bash $ICI/installer.sh journal   (Ctrl+C pour quitter)"
 tail -n 5 "$ICI/robot.log" 2>/dev/null || true

@@ -39,7 +39,7 @@ def lire_config():
             ligne = ligne.strip()
             if ligne and not ligne.startswith("#") and "=" in ligne:
                 k, v = ligne.split("=", 1)
-                conf[k.strip()] = v.strip().strip('"').strip("'")
+                conf[k.strip()] = v.strip()
     for k in ("SUPABASE_URL", "SUPABASE_ANON_KEY", "EMAIL", "MOT_DE_PASSE"):
         if not conf.get(k):
             sys.exit("Il manque {} dans robot/config.env (relance installer.sh).".format(k))
@@ -381,7 +381,14 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--une-fois", action="store_true")
     args = ap.parse_args()
-    Robot(lire_config()).tourner(une_fois=args.une_fois)
+    try:
+        robot = Robot(lire_config())
+    except RuntimeError as e:
+        journal("❌", e)
+        journal("Corrige l'e-mail ou le mot de passe avec : bash {}/installer.sh".format(ICI))
+        time.sleep(300)  # évite de réessayer en boucle avec de mauvais identifiants
+        sys.exit(1)
+    robot.tourner(une_fois=args.une_fois)
 
 
 if __name__ == "__main__":
