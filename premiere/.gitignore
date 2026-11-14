@@ -1,0 +1,7 @@
+robot/config.env
+robot/.venv/
+robot/navigateur-profil/
+robot/captures/
+robot/robot.log
+__pycache__/
+.DS_Store
