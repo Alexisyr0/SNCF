@@ -1,6 +1,6 @@
 {
   // Cloudflare : l'app est un simple site statique, rangé dans premiere/web
-  "name": "premiere",
+  "name": "sncf",
   "compatibility_date": "2026-11-14",
   "assets": {
     "directory": "./premiere/web"
