@@ -18,6 +18,10 @@ if [ "$1" = "journal" ]; then
 fi
 
 echo "1/4  Environnement Python…"
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "Python 3 est introuvable. Installe Python 3 puis relance."
+  exit 1
+fi
 python3 -m venv .venv
 .venv/bin/pip install --quiet --upgrade pip
 .venv/bin/pip install --quiet -r requirements.txt
@@ -48,8 +52,8 @@ cat > "$PLIST" <<EOF
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
   <key>ThrottleInterval</key><integer>30</integer>
-  <key>StandardOutPath</key><string>$ICI/robot.log</string>
-  <key>StandardErrorPath</key><string>$ICI/robot.log</string>
+  <key>StandardOutPath</key><string>/dev/null</string>
+  <key>StandardErrorPath</key><string>/dev/null</string>
 </dict></plist>
 EOF
 launchctl bootout "$DOMAINE" "$PLIST" 2>/dev/null || true
@@ -57,5 +61,5 @@ launchctl bootstrap "$DOMAINE" "$PLIST"
 sleep 3
 echo
 echo "✅ Robot installé : il tourne maintenant en fond et redémarre avec le Mac."
-echo "   Voir ce qu'il fait : bash $ICI/installer.sh journal   (Ctrl+C pour quitter)"
+echo "   Journal (rotation automatique) : bash $ICI/installer.sh journal   (Ctrl+C pour quitter)"
 tail -n 5 "$ICI/robot.log" 2>/dev/null || true

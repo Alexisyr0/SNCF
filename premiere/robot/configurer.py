@@ -10,7 +10,7 @@ import requests
 
 ICI = Path(__file__).resolve().parent
 FICHIER = ICI / "config.env"
-ORDRE = ["SUPABASE_URL", "SUPABASE_ANON_KEY", "EMAIL", "MOT_DE_PASSE", "NTFY_TOPIC", "APP_URL", "PAUSE"]
+ORDRE = ["SUPABASE_URL", "SUPABASE_ANON_KEY", "EMAIL", "MOT_DE_PASSE", "NTFY_TOPIC", "APP_URL", "PAUSE", "MAX_REQUETES_JOUR", "COOLDOWN_ERREUR", "COOLDOWN_MAX"]
 
 
 def lire():
@@ -62,7 +62,10 @@ def tester(conf):
 
 def main():
     conf = lire()
-    conf.setdefault("PAUSE", "5")
+    conf.setdefault("PAUSE", "15")
+    conf.setdefault("MAX_REQUETES_JOUR", "40")
+    conf.setdefault("COOLDOWN_ERREUR", "300")
+    conf.setdefault("COOLDOWN_MAX", "3600")
     if not conf.get("SUPABASE_URL") or not conf.get("SUPABASE_ANON_KEY"):
         conf["SUPABASE_URL"] = demander("URL Supabase (https://xxxx.supabase.co)", conf.get("SUPABASE_URL", ""))
         conf["SUPABASE_ANON_KEY"] = demander("Clé anon (publique) Supabase", conf.get("SUPABASE_ANON_KEY", ""))

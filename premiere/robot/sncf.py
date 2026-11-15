@@ -1,10 +1,14 @@
-"""Pilotage de SNCF Connect dans Chrome avec Playwright : remplir le formulaire, faire défiler
-les trains, passer au jour suivant, ouvrir un plan de salle, et lire les réponses JSON du site."""
+"""Automatisation contrôlée de l'interface SNCF Connect dans Chrome.
+
+Le robot utilise les interactions de page et observe les réponses chargées par le site.
+Il s'arrête sur les refus ou vérifications d'accès.
+"""
 
 import json
 import re
 import time
 import unicodedata
+from pathlib import Path
 from datetime import datetime, timedelta
 
 from playwright.sync_api import TimeoutError as PWTimeout
@@ -25,6 +29,99 @@ class FormulaireImpossible(Exception):
     """Le robot n'a pas réussi à remplir le formulaire tout seul."""
 
 
+class Garde:
+    """Limiteur local persistant : cadence, quota journalier et coupe-circuit."""
+    def __init__(self, pause=15, max_jour=40, cooldown=300, cooldown_max=3600,
+                 chemin=None, journal=print):
+        self.pause = max(10.0, float(pause))
+        self.max_jour = max(1, int(max_jour))
+        self.cooldown = max(30.0, float(cooldown))
+        self.cooldown_max = max(self.cooldown, float(cooldown_max))
+        self.chemin = Path(chemin or Path(__file__).resolve().parent / "garde.json")
+        self.journal = journal
+        self.etat = self._charger()
+
+    def _charger(self):
+        try:
+            data = json.loads(self.chemin.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                return data
+        except (OSError, ValueError, TypeError):
+            pass
+        return {"jour": "", "requêtes": 0, "derniere": 0, "erreurs": 0,
+                "attendre_jusqua": 0, "bloque": False, "motif": ""}
+
+    def _sauver(self):
+        self.chemin.parent.mkdir(parents=True, exist_ok=True)
+        temporaire = self.chemin.with_suffix(".tmp")
+        temporaire.write_text(json.dumps(self.etat, ensure_ascii=False, indent=2), encoding="utf-8")
+        temporaire.replace(self.chemin)
+
+    def reinitialiser(self):
+        self.etat = {"jour": "", "requêtes": 0, "derniere": 0, "erreurs": 0,
+                     "attendre_jusqua": 0, "bloque": False, "motif": ""}
+        self._sauver()
+
+    def verifier_disponible(self):
+        maintenant = time.time()
+        jour = time.strftime("%Y-%m-%d", time.localtime(maintenant))
+        if self.etat.get("bloque"):
+            raise Bloque("Coupe-circuit actif : {}. Vérifie SNCF Connect puis réinitialise la garde manuellement.".format(
+                self.etat.get("motif") or "incident précédent"))
+        if self.etat.get("jour") != jour:
+            self.etat["jour"] = jour
+            self.etat["requêtes"] = 0
+        if int(self.etat.get("requêtes", 0)) >= self.max_jour:
+            self._sauver()
+            raise Bloque("Quota quotidien atteint ({} requêtes). Le robot reprendra après changement de jour.".format(self.max_jour))
+
+    def avant_requete(self):
+        self.verifier_disponible()
+        maintenant = time.time()
+        cible = max(float(self.etat.get("derniere", 0)) + self.pause,
+                    float(self.etat.get("attendre_jusqua", 0)))
+        attente = cible - maintenant
+        if attente > 0:
+            self.journal("  Garde : pause de {:.0f} s avant la prochaine requête.".format(attente))
+            time.sleep(attente)
+        jour = time.strftime("%Y-%m-%d", time.localtime())
+        self.etat["jour"] = jour
+        self.etat["requêtes"] = int(self.etat.get("requêtes", 0)) + 1
+        self.etat["derniere"] = time.time()
+        self._sauver()
+
+    def requete_observee(self):
+        """Comptabilise une requête déclenchée directement dans Chrome par l'utilisateur ou le site."""
+        jour = time.strftime("%Y-%m-%d", time.localtime())
+        if self.etat.get("jour") != jour:
+            self.etat["jour"] = jour
+            self.etat["requêtes"] = 0
+        if int(self.etat.get("requêtes", 0)) >= self.max_jour:
+            self.bloquer("quota quotidien atteint pendant une action manuelle")
+            raise Bloque("Quota quotidien atteint ({} requêtes).".format(self.max_jour))
+        self.etat["requêtes"] = int(self.etat.get("requêtes", 0)) + 1
+        self.etat["derniere"] = time.time()
+        self._sauver()
+
+    def succes(self):
+        self.etat["erreurs"] = 0
+        self.etat["attendre_jusqua"] = 0
+        self._sauver()
+
+    def erreur_reseau(self, motif):
+        erreurs = int(self.etat.get("erreurs", 0)) + 1
+        delai = min(self.cooldown_max, self.cooldown * (2 ** min(erreurs - 1, 10)))
+        self.etat["erreurs"] = erreurs
+        self.etat["attendre_jusqua"] = time.time() + delai
+        self._sauver()
+        self.journal("  Garde : incident réseau, prochaine tentative différée d'au moins {:.0f} s ({})".format(delai, motif))
+
+    def bloquer(self, motif):
+        self.etat["bloque"] = True
+        self.etat["motif"] = str(motif)[:300]
+        self._sauver()
+
+
 def _chemin(url):
     return url.split("?")[0].split("sncf-connect.com")[-1]
 
@@ -43,23 +140,75 @@ def _norm(t):
 
 
 def _lire(rep):
-    if rep.status in (403, 429):
-        raise Bloque("SNCF Connect a refusé la demande ({}).".format(rep.status))
-    if rep.status != 200:
-        return None
+    """Lit une réponse attendue et s'arrête sur les refus explicites."""
+    statut = rep.status
     try:
-        return rep.json()
+        corps = rep.text()[:12000].lower()
     except Exception:
-        return None
+        corps = ""
+    marqueurs = (
+        "accès temporairement restreint", "acces temporairement restreint",
+        "trafic inhabituel", "vérifiez que vous êtes humain",
+        "verify you are human", "captcha", "access denied",
+        "request blocked", "temporarily restricted"
+    )
+    if statut in (401, 403, 407, 429, 503) or any(m in corps for m in marqueurs):
+        raise Bloque("SNCF Connect a présenté un refus ou une vérification (HTTP {}).".format(statut))
+    if statut != 200:
+        raise Bloque("Réponse SNCF Connect inattendue (HTTP {}).".format(statut))
+    try:
+        data = rep.json()
+    except Exception:
+        raise Bloque("SNCF Connect n'a pas renvoyé une réponse exploitable.")
+    if isinstance(data, dict):
+        texte = json.dumps(data, ensure_ascii=False).lower()
+        if any(m in texte for m in marqueurs):
+            raise Bloque("SNCF Connect a renvoyé une page de restriction.")
+    return data
+
+
+def _verifier_page(page):
+    """Détecte une page de vérification affichée sans se substituer à l'utilisateur."""
+    try:
+        texte = (page.locator("body").inner_text(timeout=1500) or "").lower()
+    except Exception:
+        return
+    marqueurs = (
+        "accès temporairement restreint", "acces temporairement restreint",
+        "trafic inhabituel", "vérifiez que vous êtes humain",
+        "verify you are human", "access denied", "captcha"
+    )
+    if any(m in texte for m in marqueurs):
+        raise Bloque("Une page de restriction ou de vérification est affichée dans Chrome.")
 
 
 class SNCF:
-    def __init__(self, page, pause=5.0, journal=print):
+    def __init__(self, page, pause=15.0, journal=print, garde=None):
         self.page = page
         self.pause = pause
         self.journal = journal
+        self.garde = garde
+
+    def _lire_reponse(self, rep):
+        try:
+            data = _lire(rep)
+        except Bloque as e:
+            if self.garde:
+                self.garde.bloquer(str(e))
+            raise
+        if self.garde:
+            self.garde.succes()
+        return data
 
     # --- petites aides -------------------------------------------------------
+    def _verifier_page(self):
+        try:
+            _verifier_page(self.page)
+        except Bloque as e:
+            if self.garde:
+                self.garde.bloquer(str(e))
+            raise
+
     def _attendre(self, s=None):
         time.sleep(self.pause if s is None else s)
 
@@ -113,7 +262,11 @@ class SNCF:
                     cible = o
                     break
         if cible is None:
-            cible = lignes[0][0]
+            exemples = ", ".join(nom for _, _, nom in lignes[:4])
+            raise FormulaireImpossible(
+                "La gare « {} » n'a pas été reconnue sans ambiguïté. Suggestions : {}"
+                .format(texte, exemples or "aucune")
+            )
         cible.click()
         time.sleep(0.6)
 
@@ -126,11 +279,10 @@ class SNCF:
         bouton.scroll_into_view_if_needed()
         bouton.click()
         heure = max(0, min(22, heure - heure % 2))
-        for h in (heure, 4, 6):
-            radio = self.page.get_by_role("radio", name=re.compile(r"^{:02d}h".format(h)))
-            if radio.count():
-                radio.first.click()
-                break
+        radio = self.page.get_by_role("radio", name=re.compile(r"^{:02d}h".format(heure)))
+        if not radio.count():
+            raise FormulaireImpossible("Le créneau de départ {}h n'est plus proposé.".format(heure))
+        radio.first.click()
         self.page.get_by_role("button", name="Confirmer").click()
         time.sleep(0.8)
 
@@ -198,7 +350,10 @@ class SNCF:
 
     def rechercher(self, origine, destination, jour, voyageurs, chiens, heure=4):
         """Remplit le formulaire et lance la recherche. Renvoie (jour, données)."""
+        if self.garde:
+            self.garde.verifier_disponible()
         self.page.goto(URL_FORMULAIRE, wait_until="domcontentloaded")
+        self._verifier_page()
         self._cookies()
         try:
             self.page.get_by_role("combobox", name="Gare, ville, lieu...").first.wait_for(timeout=25000)
@@ -214,23 +369,36 @@ class SNCF:
             raise
         except PWTimeout as e:
             raise FormulaireImpossible("Élément du formulaire introuvable ({}).".format(str(e).split("\n")[0][:120]))
+        self._verifier_page()
         bouton = self.page.get_by_role("button", name="Voir les prix")
-        with self.page.expect_response(est_recherche, timeout=60000) as info:
-            bouton.click()
+        if self.garde:
+            self.garde.avant_requete()
+        try:
+            with self.page.expect_response(est_recherche, timeout=60000) as info:
+                bouton.click()
+        except PWTimeout:
+            if self.garde:
+                self.garde.erreur_reseau("délai dépassé sur la recherche")
+            raise Bloque("Pas de réponse de SNCF Connect. Le robot s'arrête sans relancer la requête.")
         return jour, self._derniere_recherche(info.value)
 
     def _derniere_recherche(self, rep):
-        data = _lire(rep)
+        data = self._lire_reponse(rep)
         while True:  # SNCF Connect relance parfois la recherche juste après : on garde la dernière
             try:
                 rep = self.page.wait_for_event("response", predicate=est_recherche, timeout=6000)
-                d = _lire(rep)
+                if self.garde:
+                    self.garde.requete_observee()
+                d = self._lire_reponse(rep)
                 if d is not None:
                     data = d
             except PWTimeout:
                 break
         if data is None:
-            raise Bloque("SNCF Connect n'a pas renvoyé de résultats.")
+            motif = "SNCF Connect n'a pas renvoyé de résultats exploitables."
+            if self.garde:
+                self.garde.bloquer(motif)
+            raise Bloque(motif)
         return data
 
     def attendre_recherche_manuelle(self, delai_min=15):
@@ -241,23 +409,35 @@ class SNCF:
                 rep = self.page.wait_for_event("response", predicate=est_recherche, timeout=30000)
             except PWTimeout:
                 continue
-            try:
-                return self._derniere_recherche(rep)
-            except Bloque:
-                continue
+            if self.garde:
+                self.garde.requete_observee()
+            return self._derniere_recherche(rep)
         raise Bloque("Personne n'a relancé la recherche dans la fenêtre.")
 
     # --- parcours des jours --------------------------------------------------
     def _cliquer(self, bouton, predicat):
-        self._attendre()
+        if self.garde:
+            self.garde.verifier_disponible()
+        self._verifier_page()
+        if self.garde:
+            self.garde.avant_requete()
+        else:
+            self._attendre()
         try:
             with self.page.expect_response(predicat, timeout=45000) as info:
                 bouton.click(timeout=15000)
         except PWTimeout:
-            raise Bloque("Pas de réponse de SNCF Connect (vérification affichée ?).")
-        d = _lire(info.value)
+            if self.garde:
+                self.garde.erreur_reseau("délai dépassé sur une interaction")
+            self._verifier_page()
+            raise Bloque("Pas de réponse de SNCF Connect. Le robot s'arrête sans relancer la requête.")
+        d = self._lire_reponse(info.value)
+        self._verifier_page()
         if d is None:
-            raise Bloque("Réponse illisible de SNCF Connect.")
+            motif = "Réponse illisible de SNCF Connect."
+            if self.garde:
+                self.garde.bloquer(motif)
+            raise Bloque(motif)
         return d
 
     def suivants_du_jour(self, data):
@@ -267,10 +447,16 @@ class SNCF:
         while not journee_terminee(data) and clics < 15:
             bouton = self.page.get_by_role("button", name="Afficher les trajets suivants")
             if bouton.count() == 0:
-                break
+                raise FormulaireImpossible(
+                    "La pagination des trains s'est arrêtée avant la fin de la journée."
+                )
             data = self._cliquer(bouton.first, est_suivants)
             reponses.append(data)
             clics += 1
+        if not journee_terminee(data):
+            raise FormulaireImpossible(
+                "La limite de pagination a été atteinte ; journée non considérée comme complète."
+            )
         return reponses
 
     def jour_suivant(self, jour):
@@ -326,12 +512,18 @@ class SNCF:
         except PWTimeout:
             self.fermer_dialogues()
             raise FormulaireImpossible("Le choix de place sur plan n'est pas proposé pour ce train.")
-        with self.page.expect_response(lambda r: "/seatmap" in r.url, timeout=30000) as info:
-            choisir.first.click()
+        if self.garde:
+            self.garde.verifier_disponible()
+            self.garde.avant_requete()
+        try:
+            with self.page.expect_response(lambda r: "/seatmap" in r.url, timeout=30000) as info:
+                choisir.first.click()
+        except PWTimeout:
+            if self.garde:
+                self.garde.erreur_reseau("délai dépassé sur le plan de salle")
+            raise Bloque("Pas de réponse de SNCF Connect pour le plan de salle.")
         rep = info.value
-        if rep.status != 200:
-            raise Bloque("Plan de salle refusé ({}).".format(rep.status))
-        brut = rep.json()
+        brut = self._lire_reponse(rep)
         time.sleep(1)
         self.fermer_dialogues()
         donnees = brut.get("seatMapData")

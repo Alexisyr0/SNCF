@@ -2,6 +2,9 @@ robot/config.env
 robot/.venv/
 robot/navigateur-profil/
 robot/captures/
-robot/robot.log
+robot/robot.log*
 __pycache__/
 .DS_Store
+robot/robot.lock
+robot/garde.json
+robot/garde.tmp

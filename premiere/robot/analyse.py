@@ -10,12 +10,27 @@ MOIS = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août
 
 
 def prix(label):
-    """'120,70 €' -> 120.7 ; None si illisible."""
+    """Convertit un prix français ou international en float sans perdre les décimales."""
     if label is None:
         return None
-    s = re.sub(r"[^\d,]", "", str(label)).replace(",", ".")
+    s = re.sub(r"[^0-9,.-]", "", str(label)).strip()
+    if not s:
+        return None
+    # Si virgule et point coexistent, le dernier séparateur est le séparateur décimal.
+    if "," in s and "." in s:
+        decimal = "," if s.rfind(",") > s.rfind(".") else "."
+        milliers = "." if decimal == "," else ","
+        s = s.replace(milliers, "").replace(decimal, ".")
+    elif "," in s:
+        # Format français : 1 234,56
+        s = s.replace(".", "").replace(",", ".")
+    else:
+        # Le point est conservé comme séparateur décimal.
+        # Les espaces et séparateurs de milliers ont déjà été retirés.
+        pass
     try:
-        return float(s)
+        valeur = float(s)
+        return valeur if valeur >= 0 else None
     except ValueError:
         return None
 

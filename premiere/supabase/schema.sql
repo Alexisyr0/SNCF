@@ -71,6 +71,10 @@ create table if not exists train_releves (
   cle text,
   created_at timestamptz not null default now()
 );
+
+-- Point de reprise du robot : ajoutitif et compatible avec les recherches existantes.
+alter table train_recherches add column if not exists checkpoint jsonb;
+
 create index if not exists train_releves_exec on train_releves (execution_id, sens, jour);
 create index if not exists train_releves_rech on train_releves (recherche_id, created_at);
 
