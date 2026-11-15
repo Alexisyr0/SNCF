@@ -8,7 +8,7 @@ Les meilleurs prix SNCF en 1re, jour par jour, sur une période : aller-retour, 
 - **Le robot** (dossier `robot`) : il tourne en fond sur le Mac. Il récupère les recherches demandées dans l'app, remplit SNCF Connect dans une vraie fenêtre Chrome, fait défiler les trains jour par jour et renvoie les prix dans Supabase.
 - **Supabase** : la base de données partagée. Toutes les tables commencent par `train_`, donc elles peuvent aller dans le projet de Radar Prod ou de Loupe.
 
-SNCF Connect n'a pas d'API publique et bloque les robots qui ne passent pas par un vrai navigateur. C'est pour ça que les recherches se font sur le Mac : il doit être allumé, et pas en veille, pour qu'elles avancent. Les recherches lancées depuis l'iPhone attendent que le Mac soit disponible.
+SNCF Connect n'a pas d'API publique de prix : le robot passe donc par le site, dans Chrome, sur le Mac. Le Mac doit être allumé, et pas en veille, pour que les recherches avancent. Les recherches lancées depuis l'iPhone attendent que le Mac soit disponible.
 
 ## Installation (une seule fois)
 
@@ -51,6 +51,6 @@ Installe l'app gratuite **ntfy** et abonne-toi au sujet choisi pendant l'install
 ## Si quelque chose coince
 
 - **Le robot n'arrive pas à remplir le formulaire** (SNCF a changé son site) : la recherche passe en « Besoin d'aide sur le Mac ». Fais la recherche à la main dans la fenêtre Chrome ouverte par le robot, et il reprend à partir de là. Une capture d'écran est enregistrée dans `robot/captures`.
-- **Vérification anti-robot** : fais-la dans la fenêtre Chrome du robot. Le robot attend jusqu'à 15 minutes.
+- **Page « Accès temporairement restreint » ou vérification SNCF Connect** : le site refuse l'accès automatisé. Arrête le robot (`bash ~/Projets/SNCF/premiere/robot/installer.sh arreter`) plutôt que de le relancer.
 - **« Mac hors ligne » dans l'app** : le Mac est en veille ou le robot est arrêté. Vérifie avec `bash installer.sh journal`.
-- Le robot va volontairement lentement (5 secondes entre deux clics) pour rester discret et ne pas surcharger le site. C'est réglable avec `PAUSE` dans `robot/config.env`.
+- Le robot va volontairement lentement (5 secondes entre deux clics) pour ne pas surcharger le site. C'est réglable avec `PAUSE` dans `robot/config.env`.

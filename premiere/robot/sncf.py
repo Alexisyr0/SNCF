@@ -1,6 +1,5 @@
-"""Pilotage de SNCF Connect dans une vraie fenêtre Chrome, comme le ferait une personne :
-remplir le formulaire, faire défiler les trains, passer au jour suivant, ouvrir un plan de salle.
-Le robot lit uniquement les réponses que le site charge lui-même pour s'afficher."""
+"""Pilotage de SNCF Connect dans Chrome avec Playwright : remplir le formulaire, faire défiler
+les trains, passer au jour suivant, ouvrir un plan de salle, et lire les réponses JSON du site."""
 
 import json
 import re
